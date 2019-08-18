@@ -2,13 +2,11 @@
 <!--
 *   Consume .tsl files and produce C# types
 *
-*   (Dependencies are defined by Tsl.CSharp.props.  Be sure to import that first)
-*   Dependencies:
-*     $TSL_PATH  : Path to directory containing Trinity.TSL.CompilerTask.dll
+*   (Dependencies are defined by GraphEngine.Core.props.  Be sure to import that first)
 *
 *   User-Defines:
-*     @TslCodegen         : A tsl file to compile
-*     $TslOutputDirectory : Output directory for the generated files, by default IntermediateOutputPath
+*     @TslCodegen         : One or more tsl files to compile
+*     $TslOutputPath      : Output directory for the generated files, by default IntermediateOutputPath
 *
 -->
 <Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
@@ -16,8 +14,9 @@
   <PropertyGroup>
     <!--This property is used as OutputPath parameter in TSL_COMPILER_TASK-->
     <TslOutputPath Condition=" '$(TslOutputPath)' == '' ">$(IntermediateOutputPath)</TslOutputPath>
-    <!--This property is used to specify the location of the genreated source code-->
-    <TslGeneratedCodePath Condition=" '$(TslGeneratedCodePath)' == '' ">$(IntermediateOutputPath)GeneratedCode\</TslGeneratedCodePath>
+    <!--This property is used to specify the location of the generated source code-->
+    <!--Note, generated code path is hardcoded as TslOutputPath/GeneratedCode in the codegen.-->
+    <TslGeneratedCodePath>$(TslOutputPath)GeneratedCode\</TslGeneratedCodePath>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(TslDebugArguments)' == ''">
@@ -29,36 +28,37 @@
     <AvailableItemName Include="TslCodegen" />
   </ItemGroup>
 
-  <!--
-    * TslCodegenCs - transform .tsl files into .cs files
-  -->
-  <Target Name="TslCodegenCs"
-          Inputs="@(TslCodegen)"
-          Outputs="$(TslGeneratedCodePath)\**\*.cs"
-          BeforeTargets="CoreCompile"
-          Condition="'@(TslCodegen)' != ''">
-
-    <RemoveDir Directories="$(TslGeneratedCodePath)" ContinueOnError="true" />
+  <Target Name="TslCodegenPrepare"
+          BeforeTargets="TslCodegenCs">
+    <ItemGroup>
+      <OldGeneratedCode Include="$(TslGeneratedCodePath)**\*.cs" />
+    </ItemGroup>
     <MakeDir Directories="$(TslGeneratedCodePath)" ContinueOnError="true"/>
-    <Exec Command="&quot;$(TSL_CODEGEN_PATH)&quot; --ProjectRoot &quot;$(MSBuildProjectDirectory)&quot; --ScriptList &quot;@(TslCodegen)&quot; --RootNamespace $(RootNamespace) --OutputPath $(TslOutputPath) $(TslDebugArguments)" />
+    <Delete Files="@(OldGeneratedCode)" ContinueOnError="true"/>
+    <Exec Condition="'$(OS)' != 'Windows_NT' " Command="chmod u+x $(TSL_CODEGEN_PATH)" />
   </Target>
 
-  <Target Name="TslCodegenClean"
-          BeforeTargets="Clean">
-    <RemoveDir Directories="$(TslOutputDirectory)" ContinueOnError="true" />
+  <ItemGroup Condition="!$(TargetFramework.Contains('netstandard')) and !$(TaragetFramework.Contains('netcoreapp'))">
+    <None Include="$(TRINITY_NATIVE_LIB_PATH)">
+      <Link>%(RecursiveDir)%(FileName)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+  
+  <Target Name="TslCodegenCs"
+          BeforeTargets="TslCompileCs"
+          DependsOnTargets="TslCodegenPrepare"
+          Condition="'@(TslCodegen)' != ''">
+    <Exec Command="&quot;$(TSL_CODEGEN_PATH)&quot; --ProjectRoot &quot;$(MSBuildProjectDirectory)&quot; --ScriptList &quot;@(TslCodegen)&quot; --RootNamespace $(RootNamespace) --OutputPath &quot;$(TslOutputPath) &quot; $(TslDebugArguments) $(TslAdditionalArguments)" />
   </Target>
 
-  <!--
-    * TslCompileCs - whether or not we are rebuilding sources, we still need them compiled,
-    *                      so this target should always run.
-  -->
   <Target Name="TslCompileCs"
           BeforeTargets="CoreCompile"
-          Condition="'@(TslCodegen)' != ''">
+          DependsOnTargets="TslCodegenCs">
 
     <Error
       Text="A Graph Engine project cannot be built with Prefer32Bit option enabled. Please uncheck the toggle in project properties page, or edit the project file."
-      Condition=" $(Prefer32Bit) == true " />
+      Condition=" $(Prefer32Bit) == true AND ('$(Platform)' == 'AnyCPU' OR '$(Platform)' == 'anycpu')" />
 
     <Error
       Text="A Graph Engine project should target AnyCPU or x64. Please change the platform in the project properties page, or edit the project file."

@@ -9,32 +9,39 @@ namespace Storage
 {
     void MTHash::FreeEntry(int32_t entry_index)
     {
-        FreeListLock.lock();
-        MTEntries[entry_index].NextEntry = FreeEntryList;
-        FreeEntryList = entry_index;
-        FreeEntryCount.fetch_add(1, std::memory_order_relaxed);
-        FreeListLock.unlock();
+        FreeListLock->lock();
+        MTEntries[entry_index].NextEntry =  ExtendedInfo->FreeEntryList;
+        ExtendedInfo->FreeEntryList = entry_index;
+        ExtendedInfo->FreeEntryCount.fetch_add(1, std::memory_order_relaxed);
+        FreeListLock->unlock();
     }
 
     int32_t MTHash::FindFreeEntry()
     {
         int32_t free_entry = -1;
-        FreeListLock.lock();
+        FreeListLock->lock();
 
-        if (FreeEntryList != -1)
+        if (ExtendedInfo->FreeEntryList != -1)
         {
-            free_entry = FreeEntryList;
-            FreeEntryList = MTEntries[FreeEntryList].NextEntry;
-            FreeEntryCount.fetch_sub(1, std::memory_order_relaxed);
-            FreeListLock.unlock();
+            free_entry = ExtendedInfo->FreeEntryList;
+            ExtendedInfo->FreeEntryList = MTEntries[ExtendedInfo->FreeEntryList].NextEntry;
+            ExtendedInfo->FreeEntryCount.fetch_sub(1, std::memory_order_relaxed);
+            FreeListLock->unlock();
         }
         else
         {
-            FreeListLock.unlock();
-            free_entry = NonEmptyEntryCount.fetch_add(1, std::memory_order_relaxed);
-            while (free_entry >= (int32_t)EntryCount.load())
+            FreeListLock->unlock();
+            free_entry = ExtendedInfo->NonEmptyEntryCount.fetch_add(1, std::memory_order_relaxed);
+            while (free_entry >= (int32_t)ExtendedInfo->EntryCount.load())
             {
-                Expand(false);
+                auto result = Expand(false);
+                if (result == TrinityErrorCode::E_NOMEM)
+                {
+                    // cancel the allocation and recover
+                    ExtendedInfo->NonEmptyEntryCount.fetch_sub(1, std::memory_order_relaxed);
+                    free_entry = -1;
+                    break;
+                }
             }
         }
 
@@ -43,9 +50,9 @@ namespace Storage
 
     int32_t MTHash::Count()
     {
-        EntryAllocLock.lock();
-        int32_t _count = (NonEmptyEntryCount - FreeEntryCount);
-        EntryAllocLock.unlock();
+        EntryAllocLock->lock();
+        int32_t _count = (ExtendedInfo->NonEmptyEntryCount - ExtendedInfo->FreeEntryCount);
+        EntryAllocLock->unlock();
         return _count;
     }
 }

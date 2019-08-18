@@ -201,7 +201,7 @@ public:
                 delete pstr;
             delete arrayInfo.array_dimension_list;
             delete arrayInfo.array_dimension_size;
-            //TODO FT_LIST delete, will break Trinity.TSL.CodeGen.Neo.cpp: unitialize()
+            //TODO FT_LIST delete, will break Trinity.TSL.CodeGen.Neo.cpp: uninitialize()
             break;
         }
     }
@@ -393,6 +393,8 @@ public:
     inline bool is_syn_req_protocol()     { return (pt_type     == PT_SYN  && pt_response == PT_VOID_RESPONSE); }
     inline bool is_syn_req_rsp_protocol() { return (pt_type     == PT_SYN  && pt_response != PT_VOID_RESPONSE); }
     inline bool is_asyn_req_protocol()    { return (pt_type     == PT_ASYN && pt_response == PT_VOID_RESPONSE); }
+    inline bool is_asyn_req_rsp_protocol(){ return (pt_type     == PT_ASYN && pt_response != PT_VOID_RESPONSE); }
+
     inline void set_property(NProtocolProperty *p)
     {
         switch (p->propertyType)
@@ -499,7 +501,7 @@ public:
                 return cell;
         return NULL;
     }
-    //was referenced by server inheritence code
+    //was referenced by server inheritance code
     //NProtocolGroup* find_protocol_group(std::string* protocol_group_name)
     //{
     //    for (auto server : *serverList)

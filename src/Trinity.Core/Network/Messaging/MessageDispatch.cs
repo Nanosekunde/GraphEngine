@@ -85,6 +85,11 @@ namespace Trinity.Network.Sockets
         internal AsyncReqHandler[] async_handlers = new AsyncReqHandler[ushort.MaxValue + 1];
         internal AsyncReqHandler[] preserved_async_handlers = new AsyncReqHandler[ushort.MaxValue + 1];
 
+        /// <summary>
+        /// Handler table for asynchronous message with responseBuff
+        /// </summary>
+        internal AsyncReqRspHandler[] async_rsp_handlers = new AsyncReqRspHandler[ushort.MaxValue + 1];
+
         public MessageHandlers()
         {
             for (int i = 0; i <= ushort.MaxValue; ++i)
@@ -92,6 +97,7 @@ namespace Trinity.Network.Sockets
                 sync_rsp_handlers[i] = null;
                 sync_handlers[i] = null;
                 async_handlers[i] = null;
+                async_rsp_handlers[i] = null;
 
                 preserved_sync_rsp_handlers[i] = null;
                 preserved_sync_handlers[i] = null;
@@ -216,6 +222,22 @@ namespace Trinity.Network.Sockets
             }
         }
 
+        public bool RegisterMessageHandler(ushort msgId, AsyncReqRspHandler request_handler)
+        {
+            try
+            {
+                async_rsp_handlers[msgId] = request_handler;
+                Log.WriteLine(LogLevel.Debug, "Async with response message " + msgId + " is registered.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Trinity.Diagnostics.Log.WriteLine(ex.Message);
+                Trinity.Diagnostics.Log.WriteLine(ex.StackTrace);
+                return false;
+            }
+        }
+
         #region _SetSendRecvBuff helpers
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private unsafe void _SetSendRecvBuff(TrinityErrorCode msgProcessResult, MessageBuff* sendRecvBuff, TrinityMessage response)
@@ -224,14 +246,14 @@ namespace Trinity.Network.Sockets
             {
                 // Response buffer will be freed in Trinity.C after it is sent
                 sendRecvBuff->Buffer                     = response.Buffer;
-                sendRecvBuff->BytesToSend                = (uint)response.Size;
+                sendRecvBuff->Length                     = (uint)response.Size;
             }
             else// TrinityErrorCode.E_RPC_EXCEPTION == msgProcessResult
             {
                 //  The client is expecting a reply payload, it will be notified because
                 //  the payload length is E_RPC_EXCEPTION;
                 sendRecvBuff->Buffer                     = (byte*)Memory.malloc(sizeof(TrinityErrorCode));
-                sendRecvBuff->BytesToSend                = sizeof(TrinityErrorCode);
+                sendRecvBuff->Length                     = sizeof(TrinityErrorCode);
                 *(TrinityErrorCode*)sendRecvBuff->Buffer = TrinityErrorCode.E_RPC_EXCEPTION;
             }
         }
@@ -243,26 +265,26 @@ namespace Trinity.Network.Sockets
             {
                 //  Response buffer will be freed in Trinity.C after it is sent
                 sendRecvBuff->Buffer                     = (byte*)Memory.malloc(sizeof(TrinityErrorCode));
-                sendRecvBuff->BytesToSend                = sizeof(TrinityErrorCode);
+                sendRecvBuff->Length                     = sizeof(TrinityErrorCode);
                 *(TrinityErrorCode*)sendRecvBuff->Buffer = TrinityErrorCode.E_SUCCESS;
             }
             else//  TrinityErrorCode.E_RPC_EXCEPTION == msgProcessResult
             {
                 //  The client is expecting an ACK package, it will be notified because
-                //  the status code would be E_RPC_EXCEPTION;
+                //  the status code would be E_RPC_EXCEPTION or E_MSG_OVERFLOW;
                 sendRecvBuff->Buffer                     = (byte*)Memory.malloc(sizeof(TrinityErrorCode));
-                sendRecvBuff->BytesToSend                = sizeof(TrinityErrorCode);
-                *(TrinityErrorCode*)sendRecvBuff->Buffer = TrinityErrorCode.E_RPC_EXCEPTION;
+                sendRecvBuff->Length                     = sizeof(TrinityErrorCode);
+                *(TrinityErrorCode*)sendRecvBuff->Buffer = msgProcessResult;
             }
         }
         #endregion
 
-        internal void DispatchMessage(MessageBuff* sendRecvBuff)
+        internal void* DispatchMessage(MessageBuff* sendRecvBuff)
         {
             byte* ByteArray = sendRecvBuff->Buffer;
-            int Length = (int)sendRecvBuff->BytesReceived;
+            int Length = (int)sendRecvBuff->Length;
 
-            TrinityMessageType msgType = (TrinityMessageType)sendRecvBuff->Buffer[TrinityProtocol.TrinityMsgTypeOffset];
+            TrinityMessageType msgType = *(TrinityMessageType*)(sendRecvBuff->Buffer+TrinityProtocol.TrinityMsgTypeOffset);
             ushort msgId = *(ushort*)(ByteArray + TrinityProtocol.TrinityMsgIdOffset);
             TrinityErrorCode msgProcessResult;
 
@@ -277,7 +299,7 @@ namespace Trinity.Network.Sockets
                             sync_rsp_handlers[msgId]);
                         msgProcessResult = sync_rsp_args.MessageProcess();
                         _SetSendRecvBuff(msgProcessResult, sendRecvBuff, sync_rsp_args.Response);
-                        return;
+                        return null;
 
                     case TrinityMessageType.PRESERVED_SYNC_WITH_RSP:
                         SynReqRspArgs preserved_sync_rsp_args = new SynReqRspArgs(ByteArray,
@@ -286,7 +308,7 @@ namespace Trinity.Network.Sockets
                             preserved_sync_rsp_handlers[msgId]);
                         msgProcessResult = preserved_sync_rsp_args.MessageProcess();
                         _SetSendRecvBuff(msgProcessResult, sendRecvBuff, preserved_sync_rsp_args.Response);
-                        return;
+                        return null;
 
                     case TrinityMessageType.SYNC:
                         SynReqArgs sync_args = new SynReqArgs(ByteArray,
@@ -295,7 +317,7 @@ namespace Trinity.Network.Sockets
                             sync_handlers[msgId]);
                         msgProcessResult = sync_args.MessageProcess();
                         _SetSendRecvBuff(msgProcessResult, sendRecvBuff);
-                        return;
+                        return null;
                     case TrinityMessageType.PRESERVED_SYNC:
                         SynReqArgs preserved_sync_args = new SynReqArgs(ByteArray,
                             TrinityProtocol.TrinityMsgHeader,
@@ -303,7 +325,7 @@ namespace Trinity.Network.Sockets
                             preserved_sync_handlers[msgId]);
                         msgProcessResult = preserved_sync_args.MessageProcess();
                         _SetSendRecvBuff(msgProcessResult, sendRecvBuff);
-                        return;
+                        return null;
 
                     case TrinityMessageType.ASYNC:
                         AsynReqArgs async_args = new AsynReqArgs(ByteArray,
@@ -312,7 +334,7 @@ namespace Trinity.Network.Sockets
                             async_handlers[msgId]);
                         msgProcessResult = async_args.AsyncProcessMessage();
                         _SetSendRecvBuff(msgProcessResult, sendRecvBuff);
-                        return;
+                        return null;
                     case TrinityMessageType.PRESERVED_ASYNC:
                         AsynReqArgs preserved_async_args = new AsynReqArgs(ByteArray,
                             TrinityProtocol.TrinityMsgHeader,
@@ -320,11 +342,30 @@ namespace Trinity.Network.Sockets
                             preserved_async_handlers[msgId]);
                         msgProcessResult = preserved_async_args.AsyncProcessMessage();
                         _SetSendRecvBuff(msgProcessResult, sendRecvBuff);
-                        return;
+                        return null;
+
+                    case TrinityMessageType.ASYNC_WITH_RSP:
+                        AsynReqRspArgs async_rsp_args = new AsynReqRspArgs(ByteArray,
+                            TrinityProtocol.TrinityMsgHeader,
+                            Length - TrinityProtocol.TrinityMsgHeader,
+                            async_rsp_handlers[msgId]);
+                        msgProcessResult = async_rsp_args.AsyncProcessMessage();
+                        _SetSendRecvBuff(msgProcessResult, sendRecvBuff);
+                        return null;
 
                     default:
                         throw new Exception("Not recognized message type.");
                 }
+            }
+            catch (MessageTooLongException ex)
+            {
+                Log.WriteLine("Message Type: " + msgType);
+                Log.WriteLine("Message SN: " + msgId);
+
+                Log.WriteLine(ex.Message);
+                Log.WriteLine(ex.StackTrace);
+                _SetSendRecvBuff(TrinityErrorCode.E_MSG_OVERFLOW, sendRecvBuff);
+                return null;
             }
             catch (Exception ex)
             {
@@ -334,7 +375,7 @@ namespace Trinity.Network.Sockets
                 Log.WriteLine(ex.Message);
                 Log.WriteLine(ex.StackTrace);
                 _SetSendRecvBuff(TrinityErrorCode.E_RPC_EXCEPTION, sendRecvBuff);
-                return;
+                return null;
             }
         }
     }

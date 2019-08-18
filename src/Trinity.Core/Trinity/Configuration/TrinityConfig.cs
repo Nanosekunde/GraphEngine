@@ -15,17 +15,13 @@ using System.Linq;
 namespace Trinity
 {
     /// <summary>
-    /// Specifies the running modes supported by Trinity. This is obsolete.
+    /// Specifies the running modes supported by Trinity
     /// </summary>
     public enum RunningMode : int
     {
         /// <summary>
-        /// Undefined running mode.
-        /// </summary>
-        Undefined,
-
-        /// <summary>
-        ///Embedded (in-process) mode.
+        /// Embedded (in-process) mode. 
+        /// Enables message passing without starting the network subsystem.
         /// </summary>
         Embedded,
 
@@ -62,14 +58,6 @@ namespace Trinity
         static TrinityConfig()
         {
             GetConfigurationInstances().ToList();
-            try
-            {
-                LoadTrinityConfig();
-            }
-            catch
-            {
-                Log.WriteLine(LogLevel.Error, "Failure to load config file, the default configuration takes effect");
-            }
         }
 
         /// <summary>

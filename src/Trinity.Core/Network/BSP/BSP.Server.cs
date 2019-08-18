@@ -10,6 +10,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Trinity.Core.Lib;
+using Trinity.Diagnostics;
 using Trinity.Network.Messaging;
 
 namespace Trinity.Network
@@ -60,6 +61,7 @@ namespace Trinity.Network
             default_task_sn++;
         }
 
+        //TODO in a multi-replica partition, the semantic of the BSP message should be configured to BROADCAST
         internal static void P2PBarrierRequest(this Trinity.Storage.MemoryCloud storage, int taskId)
         {
             TrinityMessage msg = new TrinityMessage(TrinityMessageType.PRESERVED_SYNC, (ushort)RequestType.P2PBarrier, sizeof(int));
@@ -78,9 +80,9 @@ namespace Trinity.Network
 
             Parallel.For(0, Global.ServerCount, i =>
                 {
-                    if (i != Global.MyServerId)
+                    if (i != Global.MyPartitionId)
                     {
-                        storage.SendMessageToServer(i, msg);
+                        storage[i].SendMessage(msg.Buffer, msg.Size);
                     }
                 }
             );
@@ -113,7 +115,7 @@ namespace Trinity.Network
             for (int i = 0; i < count; i++)
                 storage.BarrierSync();
             sw.Stop();
-            Console.WriteLine("{0} Barrier Sync took {1}", count, sw.ElapsedMilliseconds);
+            Log.WriteLine("{0} Barrier Sync took {1}", count, sw.ElapsedMilliseconds);
         }
     }
 }

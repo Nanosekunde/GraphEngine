@@ -5,16 +5,16 @@
 #include "TrinityCommon.h"
 #include "Trinity/Configuration/TrinityConfig.h"
 #include "Storage/LocalStorage/LocalMemoryStorage.h"
+#include "Storage/MTHash/MTHash.h"
 #include "Memory/Memory.h"
 
 namespace TrinityConfig
 {
     String storage_root           = "";
-    String log_directory          = "";
     bool read_only                = false;
     bool handshake                = true;
     bool client_disable_sndbuffer = false;
-    int32_t trunk_count           = 256;
+    int32_t trunk_count           = TrinityConfig::MaxTrunkCount;
 
     /// <summary>
     /// Default Value = 16
@@ -42,18 +42,6 @@ namespace TrinityConfig
     {
         storage_root = storageRoot;
         Diagnostics::WriteLine(LogLevel::Verbose, "StorageRoot set to {0}", storage_root);
-    }
-
-    String LogDirectory()
-    {
-        if (log_directory.Empty())
-            log_directory = Path::CompletePath(Path::Combine(Path::MyAssemblyPath(), "trinity-log"), true);
-        return log_directory;
-    }
-
-    void SetLogDirectory(String logDir)
-    {
-        log_directory = logDir;
     }
 
     void SetGCDefragInterval(int32_t interval)
@@ -116,7 +104,7 @@ namespace TrinityConfig
             bit_cnt += (v & 1);
         }
 
-        if (bit_cnt != 1 || value > 256)
+        if (bit_cnt != 1 || value < 0 || value > TrinityConfig::MaxTrunkCount)
         {
             Diagnostics::WriteLine(LogLevel::Error, "TrinityConfig: 'TrunkCount' should be power of 2 between range [1, 256].");
             return;
@@ -142,7 +130,7 @@ namespace TrinityConfig
         }
     }
 
-    uint64_t MemoryReserveUnit()
+    uint64_t ReserveEntriesPerMTHash()
     {
         switch (CapacityProfile)
         {
@@ -160,29 +148,7 @@ namespace TrinityConfig
             return 0x200000;  // 2M
         case StorageCapacityProfile::Max256M:
             return 0x100000;  // 1M
-        default:
-            return 0x2000000;// 32 M
-        }
-    }
-
-    uint32_t MaxEntryCount()
-    {
-        switch (CapacityProfile)
-        {
-        case StorageCapacityProfile::Max32G:
-            return 0x8000000; // 128 M
-        case StorageCapacityProfile::Max16G:
-            return 0x4000000; // 64 M
-        case StorageCapacityProfile::Max4G:
-            return 0x1000000; // 16 M
-        case StorageCapacityProfile::Max2G:
-            return 0x800000;  // 8M
-        case StorageCapacityProfile::Max1G:
-            return 0x400000;  // 4M
-        case StorageCapacityProfile::Max512M:
-            return 0x200000;  // 2M
-        case StorageCapacityProfile::Max256M:
-            return 0x100000;  // 1M
+        case StorageCapacityProfile::Max8G:
         default:
             return 0x2000000;// 32 M
         }
@@ -193,30 +159,9 @@ namespace TrinityConfig
         return ReservedSpacePerTrunk() * TrunkCount();
     }
 
-    /// <summary>
-    /// Value = 2G + MemoryReserveUnit * 32
-    /// </summary>
     uint64_t ReservedSpacePerTrunk()
     {
-        switch (CapacityProfile)
-        {
-        case StorageCapacityProfile::Max32G:
-            return 0x180000000; // 6G
-        case StorageCapacityProfile::Max16G:
-            return 0x100000000; // 4G
-        case StorageCapacityProfile::Max4G:
-            return 0xA0000000; // 2.5 G
-        case StorageCapacityProfile::Max2G:
-            return 0x90000000; // 2 G + 256 M
-        case StorageCapacityProfile::Max1G:
-            return 0x88000000; // 2 G + 128 M
-        case StorageCapacityProfile::Max512M:
-            return 0x84000000; // 2 G + 64 M
-        case StorageCapacityProfile::Max256M:
-            return 0x82000000; // 2 G + 32 M
-        default:
-            return 0xC0000000;// 3G
-        }
+        return Memory::RoundUpToPage_64(TrinityConfig::TwoGigabytes + Storage::MTHash::MTHashReservedSpace());
     }
 
     int32_t GetStorageCapacityProfile()
@@ -235,7 +180,7 @@ DLL_EXPORT BOOL    CHandshake() { return TrinityConfig::Handshake() ? TRUE : FAL
 DLL_EXPORT VOID    CSetHandshake(bool value) { TrinityConfig::SetHandshake(value); }
 DLL_EXPORT BOOL    CClientDisableSendBuffer() { return TrinityConfig::ClientDisableSendBuffer() ? TRUE : FALSE; }
 DLL_EXPORT VOID    CSetClientDisableSendBuffer(bool value) { TrinityConfig::SetClientDisableSendBuffer(value); }
-DLL_EXPORT VOID    SetStorageRoot(const char* buffer, int32_t length) { TrinityConfig::SetStorageRoot(String::FromWcharArray((u16char*)buffer, length >> 1)); }
+DLL_EXPORT VOID    SetStorageRoot(const u16char* buffer, int32_t length) { TrinityConfig::SetStorageRoot(String::FromWcharArray(buffer, length >> 1)); }
 DLL_EXPORT BOOL    CReadOnly() { return TrinityConfig::ReadOnly() ? TRUE : FALSE; }
 DLL_EXPORT void    CSetReadOnly(bool value) { TrinityConfig::SetReadOnly(value); }
 DLL_EXPORT int32_t CTrunkCount() { return TrinityConfig::TrunkCount(); }

@@ -37,7 +37,7 @@ namespace Trinity.Network.Messaging
             Size = TrinityProtocol.MsgHeader + size;
             Buffer = (byte*)CMemory.C_malloc((ulong)Size);
             *(int*)Buffer = TrinityProtocol.TrinityMsgHeader + size;
-            *(Buffer + TrinityProtocol.MsgTypeOffset) = (byte)msgType;
+            *(TrinityMessageType*)(Buffer + TrinityProtocol.MsgTypeOffset) = msgType;
             *(ushort*)(Buffer + TrinityProtocol.MsgIdOffset) = msgId;
         }
 
@@ -78,7 +78,7 @@ namespace Trinity.Network.Messaging
         }
 
         /// <summary>
-        /// Allocate a TrinityMessage whose buffer length is the specified size
+        /// Allocate a TrinityMessage whose buffer length is the specified size, including SocketMsgHeader
         /// </summary>
         /// <param name="size">Message buffer length</param>
         internal unsafe TrinityMessage(int size)

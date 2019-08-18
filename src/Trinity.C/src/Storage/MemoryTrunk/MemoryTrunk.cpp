@@ -32,18 +32,29 @@ namespace Storage
         InitLOContainer();
     }
 
-    MemoryTrunk::MemoryTrunk(){}
-    MemoryTrunk::MemoryTrunk(int32_t id, void* mem_ptr, uint64_t initial_size)
+    MemoryTrunk::MemoryTrunk()
+    {
+        split_lock  = new TrinityLock();
+        alloc_lock  = new TrinityLock();
+        defrag_lock = new TrinityLock();
+        lo_lock     = new TrinityLock();
+    }
+
+    MemoryTrunk::MemoryTrunk(int32_t id, void* mem_ptr, uint64_t initial_size): MemoryTrunk()
     {
         Initialize(id, mem_ptr, initial_size);
     }
 
     MemoryTrunk::MemoryTrunk(int32_t id, void* mem_ptr) :
-        MemoryTrunk::MemoryTrunk(id, mem_ptr, TrinityConfig::MemoryPoolSize){}
+        MemoryTrunk::MemoryTrunk(id, mem_ptr, TrinityConfig::InitialMemoryPoolSize){}
 
     MemoryTrunk::~MemoryTrunk()
     {
         DeallocateTrunk();
+        delete split_lock;
+        delete alloc_lock;
+        delete defrag_lock;
+        delete lo_lock;
     }
 
     void MemoryTrunk::DeallocateTrunk()
@@ -54,7 +65,10 @@ namespace Storage
 
     void MemoryTrunk::AllocateTrunk(void* mem_ptr, uint64_t size, bool LockPhysicalMemory)
     {
-        size = size < (TrinityConfig::MemoryPoolSize >> 8) ? (TrinityConfig::MemoryPoolSize >> 8) : size;
+        size = std::max(size, TrinityConfig::InitialMemoryPoolSize / TrinityConfig::MaxTrunkCount);
+        // align size to system page
+        size = Memory::RoundUpToPage_64(size);
+
         trunkPtr = (char*)Memory::MemoryCommit(mem_ptr, size);
         if (trunkPtr == nullptr)
         {

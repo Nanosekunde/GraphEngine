@@ -16,6 +16,7 @@ using System.IO;
 using Newtonsoft.Json;
 using System.Threading.Tasks;
 using System.Collections;
+using FanoutSearch.Protocols.TSL.FanoutSearch;
 
 namespace FanoutSearch
 {
@@ -155,7 +156,7 @@ namespace FanoutSearch
             var query = Serialize();
             using (var query_msg = new Protocols.TSL.FanoutQueryMessageWriter(query.maxHop, query.origin, query.originQuery, query.predicates, query.edge_types, query.return_selection, query.skip_count, query.take_count))
             {
-                var results = Module.FanoutSearchQuery(0, query_msg);
+                var results = Global.CloudStorage[0].FanoutSearchQuery(query_msg);
 
                 switch (results.transaction_id)
                 {
@@ -185,8 +186,8 @@ namespace FanoutSearch
 
         private void EvaluateQueryParameters()
         {
-            TraverseActionRewritter rewritter = new TraverseActionRewritter();
-            m_traverseActions = m_traverseActions.Select(_ => rewritter.Visit(_)).ToList();
+            TraverseActionRewriter rewriter = new TraverseActionRewriter();
+            m_traverseActions = m_traverseActions.Select(_ => rewriter.Visit(_)).ToList();
         }
 
         private void QueryExpressionSecurityCheck()

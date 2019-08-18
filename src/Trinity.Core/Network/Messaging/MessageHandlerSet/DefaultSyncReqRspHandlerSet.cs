@@ -41,7 +41,7 @@ namespace Trinity.Network.Messaging
                 #region LoadCell
                 tupleList.Add(new TypeSyncRequestResponseHandlerTuple
                 {
-                    Id = (byte)RequestType.LoadCell,
+                    Id = (ushort)RequestType.LoadCell,
                     Handler = delegate(SynReqRspArgs args)
                     {
                         int index, cellSize;
@@ -65,7 +65,7 @@ namespace Trinity.Network.Messaging
                 #region LoadCellWithType
                 tupleList.Add(new TypeSyncRequestResponseHandlerTuple
                 {
-                    Id = (byte)RequestType.LoadCellWithType,
+                    Id = (ushort)RequestType.LoadCellWithType,
                     Handler = delegate(SynReqRspArgs args)
                     {
                         int index, cellSize;
@@ -91,7 +91,7 @@ namespace Trinity.Network.Messaging
                 #region RemoveCell
                 tupleList.Add(new TypeSyncRequestResponseHandlerTuple
                 {
-                    Id = (byte)RequestType.RemoveCell,
+                    Id = (ushort)RequestType.RemoveCell,
                     Handler = delegate(SynReqRspArgs args)
                     {
                         var eResult = Global.LocalStorage.RemoveCell(*(long*)(args.Buffer + args.Offset));
@@ -103,7 +103,7 @@ namespace Trinity.Network.Messaging
                 #region SaveCell
                 tupleList.Add(new TypeSyncRequestResponseHandlerTuple
                 {
-                    Id = (byte)RequestType.SaveCell,
+                    Id = (ushort)RequestType.SaveCell,
                     Handler = delegate(SynReqRspArgs args)
                     {
                         //cell_type(2) + cell_id(8) +cell_size(4) + cell_bytes (8 + 4 +cell_bytes)
@@ -119,7 +119,7 @@ namespace Trinity.Network.Messaging
                 #region AddCell
                 tupleList.Add(new TypeSyncRequestResponseHandlerTuple
                 {
-                    Id = (byte)RequestType.AddCell,
+                    Id = (ushort)RequestType.AddCell,
                     Handler = delegate(SynReqRspArgs args)
                     {
                         //cell_type(2) + cell_id(8) +cell_size(4) + cell_bytes (8 + 4 +cell_bytes)
@@ -135,7 +135,7 @@ namespace Trinity.Network.Messaging
                 #region UpdateCell
                 tupleList.Add(new TypeSyncRequestResponseHandlerTuple
                 {
-                    Id = (byte)RequestType.UpdateCell,
+                    Id = (ushort)RequestType.UpdateCell,
                     Handler = delegate(SynReqRspArgs args)
                     {
                         //cell_id(8) +cell_size(4) + cell_bytes (8 + 4 +cell_bytes)
@@ -151,7 +151,7 @@ namespace Trinity.Network.Messaging
                 #region Sampling
                 tupleList.Add(new TypeSyncRequestResponseHandlerTuple
                 {
-                    Id = (byte)RequestType.Sampling,
+                    Id = (ushort)RequestType.Sampling,
                     Handler = delegate(SynReqRspArgs args)
                     {
                         int count;
@@ -196,7 +196,7 @@ namespace Trinity.Network.Messaging
                 #region EchoPing
                 tupleList.Add(new TypeSyncRequestResponseHandlerTuple
                 {
-                    Id = (byte)RequestType.EchoPing,
+                    Id = (ushort)RequestType.EchoPing,
                     Handler = delegate(SynReqRspArgs args)
                     {
                         args.Response = new TrinityMessage(args.Buffer, args.Offset, args.Size);
@@ -207,7 +207,7 @@ namespace Trinity.Network.Messaging
                 #region FailureNotification
                 tupleList.Add(new TypeSyncRequestResponseHandlerTuple
                 {
-                    Id = (byte)RequestType.FailureNotification,
+                    Id = (ushort)RequestType.FailureNotification,
                     Handler = delegate(SynReqRspArgs args)
                     {
                         DefaultFailureHandler.FailureNotificationMessageHandler(ref args);
@@ -218,7 +218,7 @@ namespace Trinity.Network.Messaging
                 #region GetCommunicationSchema
                 tupleList.Add(new TypeSyncRequestResponseHandlerTuple
                 {
-                    Id = (byte)RequestType.GetCommunicationSchema,
+                    Id = (ushort)RequestType.GetCommunicationSchema,
                     Handler = delegate(SynReqRspArgs args)
                     {
                         var schema        = Global.CommunicationSchema;
@@ -227,7 +227,7 @@ namespace Trinity.Network.Messaging
                         int msg_len       = (name_str.Length + protocols_str.Length) * sizeof(char) + 2 * sizeof(int);
                         args.Response     = new TrinityMessage(TrinityErrorCode.E_SUCCESS, msg_len);
 
-                        SmartPointer sp   = SmartPointer.New(args.Response.Buffer + TrinityMessage.Offset);
+                        PointerHelper sp   = PointerHelper.New(args.Response.Buffer + TrinityMessage.Offset);
 
                         *sp.ip++          = name_str.Length;
                         BitHelper.WriteString(name_str, sp.bp);
@@ -241,7 +241,7 @@ namespace Trinity.Network.Messaging
                 #region GetCommunicationModuleOffsets
                 tupleList.Add(new TypeSyncRequestResponseHandlerTuple
                 {
-                    Id = (byte)RequestType.GetCommunicationModuleOffsets,
+                    Id = (ushort)RequestType.GetCommunicationModuleOffsets,
                     Handler = delegate(SynReqRspArgs args)
                     {
                         TrinityErrorCode errno = TrinityErrorCode.E_FAILURE;
@@ -249,7 +249,8 @@ namespace Trinity.Network.Messaging
                         int syn_req_id         = -1;
                         int syn_req_rsp_id     = -1;
                         int asyn_req_id        = -1;
-                        SmartPointer req_sp    = SmartPointer.New(args.Buffer + args.Offset);
+                        int asyn_req_rsp_id    = -1;
+                        PointerHelper req_sp    = PointerHelper.New(args.Buffer + args.Offset);
                         int moduleName_len     = *req_sp.ip++;
                         string moduleName      = BitHelper.GetString(req_sp.bp, moduleName_len * 2);
 
@@ -261,15 +262,17 @@ namespace Trinity.Network.Messaging
                                 syn_req_id     = comm_module.SynReqIdOffset;
                                 syn_req_rsp_id = comm_module.SynReqRspIdOffset;
                                 asyn_req_id    = comm_module.AsynReqIdOffset;
+                                asyn_req_rsp_id= comm_module.AsynReqRspIdOffset;
                                 errno          = TrinityErrorCode.E_SUCCESS;
                             }
                         }
 
-                        args.Response          = new TrinityMessage(errno, sizeof(int) * 3);
-                        SmartPointer rsp_sp    = SmartPointer.New(args.Response.Buffer + TrinityMessage.Offset);
+                        args.Response          = new TrinityMessage(errno, sizeof(int) * 4);
+                        PointerHelper rsp_sp    = PointerHelper.New(args.Response.Buffer + TrinityMessage.Offset);
                         *rsp_sp.ip++           = syn_req_id;
                         *rsp_sp.ip++           = syn_req_rsp_id;
                         *rsp_sp.ip++           = asyn_req_id;
+                        *rsp_sp.ip++           = asyn_req_rsp_id;
 
                     }
                 });
@@ -278,7 +281,7 @@ namespace Trinity.Network.Messaging
                 #region Contains
                 tupleList.Add(new TypeSyncRequestResponseHandlerTuple
                 {
-                    Id = (byte)RequestType.Contains,
+                    Id = (ushort)RequestType.Contains,
                     Handler = delegate(SynReqRspArgs args)
                     {
                         if (Global.LocalStorage.Contains(*(long*)(args.Buffer + args.Offset)))
@@ -296,13 +299,13 @@ namespace Trinity.Network.Messaging
                 #region GetCellType
                 tupleList.Add(new TypeSyncRequestResponseHandlerTuple
                 {
-                    Id = (byte)RequestType.GetCellType,
+                    Id = (ushort)RequestType.GetCellType,
                     Handler = delegate(SynReqRspArgs args)
                     {
                         ushort cellType;
                         var eResult = Global.LocalStorage.GetCellType(*(long*)(args.Buffer + args.Offset), out cellType);
                         args.Response = new TrinityMessage(eResult, sizeof(ushort));
-                        *(UInt16*)(args.Response.Buffer + TrinityProtocol.MsgHeader) = cellType;
+                        *(ushort*)(args.Response.Buffer + TrinityProtocol.MsgHeader) = cellType;
                     }
                 });
                 #endregion
@@ -310,7 +313,7 @@ namespace Trinity.Network.Messaging
                 #region QueryMemoryWorkingSet
                 tupleList.Add(new TypeSyncRequestResponseHandlerTuple
                 {
-                    Id = (byte)RequestType.QueryMemoryWorkingSet,
+                    Id = (ushort)RequestType.QueryMemoryWorkingSet,
                     Handler = (args) =>
                         {
                             args.Response = new TrinityMessage(TrinityProtocol.MsgHeader + sizeof(long));

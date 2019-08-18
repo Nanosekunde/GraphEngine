@@ -6,88 +6,109 @@
 #include "Storage/MemoryTrunk/MemoryTrunk.h"
 #include "Utility/HashHelper.h"
 #include <Trinity/Hash/MD5.h>
+#include "MT_ENUMERATOR.h"
 
 namespace Storage
 {
     using namespace Trinity::Hash;
 
-    uint64_t MTHash::MTEntryOffset;
-    uint64_t MTHash::BucketMemoryOffset;
-    uint64_t MTHash::BucketLockerMemoryOffset;
+    uint64_t MTHash::LookupLossyCounter = 0;
+
+    MTHash::MTHash()
+    {
+        BucketLockers  = nullptr;
+        ExtendedInfo   = new MTHashAllocationInfo();
+        FreeListLock   = new TrinityLock();
+        EntryAllocLock = new TrinityLock();
+    }
+
+    MTHash::~MTHash()
+    {
+        DeallocateMTHash();
+        if(BucketLockers) Memory::DecommitMemory(BucketLockers, BucketCount);
+        delete ExtendedInfo;
+        delete FreeListLock;
+        delete EntryAllocLock;
+    }
 
     void MTHash::AllocateMTHash()
     {
         char* CellEntryPtr     = memory_trunk->trunkPtr + MemoryTrunk::TrunkLength;
-        char* MTEntryPtr       = CellEntryPtr + MTHash::MTEntryOffset;
-        char* BucketPtr        = CellEntryPtr + MTHash::BucketMemoryOffset;
-        char* BucketLockersPtr = CellEntryPtr + MTHash::BucketLockerMemoryOffset;
+        char* MTEntryPtr       = CellEntryPtr + MTHash::MTEntryOffset();
+        char* BucketPtr        = CellEntryPtr + MTHash::BucketMemoryOffset();
+        char* BucketLockersPtr = CellEntryPtr + MTHash::BucketLockerMemoryOffset();
 
-        uint32_t AllocatedEntryCount = EntryCount + UInt32_Contants::GuardedEntryCount;
+        size_t nrAllocatedEntry = ExtendedInfo->EntryCount + UInt32_Contants::GuardedEntryCount;
 
-        CellEntries = (CellEntry*)Memory::MemoryCommit(CellEntryPtr, (size_t)(AllocatedEntryCount) << 3);
-        memset((char*)CellEntries, -1, (AllocatedEntryCount << 3));
+        CellEntries = (CellEntry*)Memory::MemoryCommit(CellEntryPtr, nrAllocatedEntry * szCellEntry());
+        memset((char*)CellEntries, -1, nrAllocatedEntry * szCellEntry());
 
-        MTEntries = (MTEntry*)Memory::MemoryCommit(MTEntryPtr, (size_t)AllocatedEntryCount << 4);
+        MTEntries = (MTEntry*)Memory::MemoryCommit(MTEntryPtr, nrAllocatedEntry * szMTEntry());
+        memset((char*)MTEntries, 0, nrAllocatedEntry * szMTEntry());
 
-        Buckets = (int*) Memory::MemoryCommit(BucketPtr, BucketCount << 2);
-        memset((char*) Buckets, -1, Memory::RoundUpToPage(BucketCount << 2));
+        Buckets = (int*) Memory::MemoryCommit(BucketPtr, BucketCount * szBucket());
+        memset((char*) Buckets, -1, BucketCount * szBucket());
 
-        if (!TrinityConfig::ReadOnly() && BucketLockers == nullptr)
-            BucketLockers = (std::atomic<char>*)Memory::MemoryCommit(BucketLockersPtr, BucketCount);
+        if (!TrinityConfig::ReadOnly())
+        {
+            BucketLockers = (std::atomic<char>*)Memory::MemoryCommit(BucketLockersPtr, BucketCount * szBucketLock());
+            memset((char*) BucketLockers, 0, BucketCount * szBucketLock());
+        }
 
         if (MTHash::PhysicalMemoryLocking)
         {
-            if (!VirtualLock(CellEntryPtr, ((size_t)AllocatedEntryCount << 3)))
+            if (!VirtualLock(CellEntryPtr, nrAllocatedEntry * szCellEntry()))
                 Trinity::Diagnostics::FatalError("Cannot lock the CellEntries of MTHash {0} into physical memory.", memory_trunk->TrunkId);
 
-            if (!VirtualLock(MTEntries, ((size_t)AllocatedEntryCount << 4)))
+            if (!VirtualLock(MTEntries, nrAllocatedEntry * szMTEntry()))
                 Trinity::Diagnostics::FatalError("Cannot lock the MTEntries of MTHash {0} into physical memory.", memory_trunk->TrunkId);
 
-            if (!VirtualLock(BucketPtr, ((size_t) BucketCount << 2)))
+            if (!VirtualLock(BucketPtr, BucketCount * szBucket()))
                 Trinity::Diagnostics::FatalError("Cannot lock the Buckets of MTHash {0} into physical memory.", memory_trunk->TrunkId);
 
             if (!TrinityConfig::ReadOnly() && BucketLockers != nullptr)
             {
-                if (!VirtualLock(BucketLockersPtr, BucketCount))
+                if (!VirtualLock(BucketLockersPtr, BucketCount * szBucketLock()))
                     Trinity::Diagnostics::FatalError("Cannot lock the BucketLockers of MTHash {0} into physical memory.", memory_trunk->TrunkId);
             }
         }
     }
 
-    void MTHash::DeallocateMTHash(bool deallocateBucketLockers)
+    void MTHash::DeallocateMTHash()
     {
-        uint32_t AllocatedEntryCount = EntryCount + UInt32_Contants::GuardedEntryCount;
+        size_t nrAllocatedEntry = ExtendedInfo->EntryCount + UInt32_Contants::GuardedEntryCount;
         if (PhysicalMemoryLocking)
         {
-            VirtualUnlock(CellEntries, (size_t)AllocatedEntryCount << 3);
-            VirtualUnlock(MTEntries, (size_t)AllocatedEntryCount << 4);
-            VirtualUnlock(Buckets, BucketCount << 2);
+            VirtualUnlock(CellEntries, nrAllocatedEntry * szCellEntry());
+            VirtualUnlock(MTEntries, nrAllocatedEntry * szMTEntry());
+            VirtualUnlock(Buckets, BucketCount * szBucket());
             if (BucketLockers != nullptr)
-                VirtualUnlock(BucketLockers, BucketCount);
+                VirtualUnlock(BucketLockers, BucketCount * szBucketLock());
         }
 
-        Memory::DecommitMemory(CellEntries, (size_t)AllocatedEntryCount << 3);
-        Memory::DecommitMemory(MTEntries, (size_t)AllocatedEntryCount << 4);
-        Memory::DecommitMemory(Buckets, BucketCount << 2);
+        Memory::DecommitMemory(CellEntries, nrAllocatedEntry * szCellEntry());
+        Memory::DecommitMemory(MTEntries, nrAllocatedEntry * szMTEntry());
+        Memory::DecommitMemory(Buckets, BucketCount * szBucket());
 
-        EntryCount = 0;
-        CellEntries = nullptr;
-        MTEntries   = nullptr;
-        Buckets     = nullptr;
-
-        if (BucketLockers != nullptr && deallocateBucketLockers)
+        if (BucketLockers != nullptr)
         {
-            Memory::DecommitMemory(BucketLockers, BucketCount);
-            BucketLockers = nullptr;
+            Memory::DecommitMemory(BucketLockers, BucketCount * szBucketLock());
         }
+
+        ExtendedInfo->EntryCount = 0;
+
+        CellEntries   = nullptr;
+        MTEntries     = nullptr;
+        Buckets       = nullptr;
+        BucketLockers = nullptr;
     }
 
     void MTHash::InitMTHashAttributes(MemoryTrunk * mt)
     {
-        FreeEntryList = -1;
-        EntryCount.store(0);
-        NonEmptyEntryCount.store(0);
-        FreeEntryCount.store(0);
+        ExtendedInfo->FreeEntryList = -1;
+        ExtendedInfo->EntryCount.store(0);
+        ExtendedInfo->NonEmptyEntryCount.store(0);
+        ExtendedInfo->FreeEntryCount.store(0);
         this->memory_trunk            = mt;
         this->memory_trunk->hashtable = this;
     }
@@ -95,7 +116,7 @@ namespace Storage
     void MTHash::Initialize(uint32_t capacity, MemoryTrunk * mt)
     {
         InitMTHashAttributes(mt);
-        this->EntryCount = capacity;
+        this->ExtendedInfo->EntryCount = capacity;
         AllocateMTHash();
     }
 
@@ -107,22 +128,22 @@ namespace Storage
 
     void MTHash::Clear()
     {
-        if (NonEmptyEntryCount > 0)
+        if (ExtendedInfo->NonEmptyEntryCount > 0)
         {
-            for (uint32_t i = 0; i < EntryCount; i++)
+            for (uint32_t i = 0; i < BucketCount; i++)
             {
                 Buckets[i] = -1;
             }
-            memset((char*) CellEntries, -1, (size_t) (NonEmptyEntryCount * sizeof(CellEntry)));
-            FreeEntryList      = -1;
-            NonEmptyEntryCount = 0;
-            FreeEntryCount     = 0;
+            memset((char*) CellEntries, -1, (size_t) (ExtendedInfo->NonEmptyEntryCount * szCellEntry()));
+            ExtendedInfo->FreeEntryList      = -1;
+            ExtendedInfo->NonEmptyEntryCount = 0;
+            ExtendedInfo->FreeEntryCount     = 0;
         }
     }
 
-    MTHash::~MTHash()
+    void MTHash::MarkTrunkDirty()
     {
-        DeallocateMTHash(/**is_dtor:*/true);
+        _mm_stream_si32(&LocalMemoryStorage::dirty_flags[memory_trunk->TrunkId], 1);
     }
 
     void MTHash::ResetSizeEntryUnsafe(int32_t index)
@@ -133,14 +154,18 @@ namespace Storage
 
     uint64_t MTHash::CommittedMemorySize()
     {
-        uint32_t entry_count = EntryCount.load(std::memory_order_relaxed);
-        return Memory::RoundUpToPage(MTHash::BucketCount << 2) /* Buckets */ + Memory::RoundUpToPage(MTHash::BucketCount) /* Bucket Lock */ + Memory::RoundUpToPage(entry_count << 3) /* CellEntries */ + Memory::RoundUpToPage(entry_count << 4) /* MTEntries */;
+        uint32_t entry_count = ExtendedInfo->EntryCount.load(std::memory_order_relaxed);
+        return 
+            Memory::RoundUpToPage_64(BucketCount * szBucket()) + 
+            Memory::RoundUpToPage_64(MTHash::BucketCount * szBucketLock()) + 
+            Memory::RoundUpToPage_64(entry_count * szCellEntry()) + 
+            Memory::RoundUpToPage_64(entry_count * szMTEntry());
     }
 
     uint64_t MTHash::TotalCellSize()
     {
         uint64_t size = 0;
-        for (int32_t i = 0; i < NonEmptyEntryCount; i++)
+        for (int32_t i = 0; i < ExtendedInfo->NonEmptyEntryCount; i++)
         {
             if (CellEntries[i].location != -1)
                 size += CellSize(i);
